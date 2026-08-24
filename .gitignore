@@ -1,0 +1,13 @@
+data/conversation.json
+
+logs/*
+!logs/.gitkeep
+
+__pycache__/
+*.pyc
+
+venv/
+.venv/
+
+.idea/
+.vscode/
