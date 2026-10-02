@@ -200,12 +200,6 @@ This project was developed as a practical exercise to improve my knowledge of:
 Possible future improvements include:
 
 * 🎙️ Voice input and output
-* 🔊 Pronunciation practice
-* 📊 Learning progress tracking
-* 🧠 Improved conversation memory
-* 🧪 Automated tests
-* ⚙️ Additional application settings
-* 📈 User learning statistics
 
 ## License
 
