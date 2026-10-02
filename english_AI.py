@@ -1,145 +1,189 @@
-import ollama
-import logging
-from ollama import ResponseError
-from config import MODEL , SYSTEM_PROMPT, MAX_HISTORY, MAX_MESSAGE_LENGTH, MEMORY_FILE
 import json
-
-
-
-logging.basicConfig(
-    filename='logs/english_ai.log',
-    level=logging.ERROR,
-    format='%(asctime)s - %(levelname)s - %(message)s'
+import logging
+from groq import Groq
+from config import (
+    GROQ_API_KEY,
+    MODEL,
+    SYSTEM_PROMPT,
+    MAX_HISTORY,
+    MAX_MESSAGE_LENGTH,
+    MEMORY_FILE
 )
 
 
 class EnglishAI:
+
     def __init__(self):
+
+        self.client = Groq(api_key=GROQ_API_KEY)
+
         self.model = MODEL
-        self.mensagens = [
-    {
-        'role': 'system',
-        'content': SYSTEM_PROMPT
-    }
-]
+
+        self.mensagens = []
+
         self.carregar_memoria()
 
-
-
     def salvar_memoria(self):
+
         try:
 
-            dados = {
-                'messages': self.mensagens[1:]
-            }
-
-            with open(MEMORY_FILE, 'w', encoding='utf-8') as arquivo:
-                json.dump(dados, arquivo, ensure_ascii=False, indent=4)
+            with open(MEMORY_FILE, "w", encoding="utf-8") as arquivo:
+                json.dump(
+                    self.mensagens,
+                    arquivo,
+                    ensure_ascii=False,
+                    indent=4
+                )
 
         except Exception as erro:
 
-            logging.error(f'Erro ao salvar memória: {erro}')
-
-    def carregar_memoria(self):
-        try:
-            with open(MEMORY_FILE,'r', encoding='utf-8') as arquivo:
-                dados = json.load(arquivo)
-            self.mensagens = [
-                            {
-                                'role': 'system',
-                                'content': SYSTEM_PROMPT
-                            }
-                        ] + dados['messages']
-
-        except FileNotFoundError:
-            logging.error('Arquivo de memória não encontrado.')
-
-        except (json.JSONDecodeError, KeyError):
-            logging.error('Arquivo de memória inválido')
-
-
-    def _enviar_para_ollama(self,mensagens):
-       
-        try:
-
-            resposta = ollama.chat(
-                model=self.model,
-                messages=mensagens
+            logging.error(
+                f"Erro ao salvar memória: {erro}"
             )
 
-            return resposta ['message']['content']
+    def carregar_memoria(self):
 
-        except ResponseError as erro:
-            logging.error(f'Erro do Ollama:{erro}')
+        try:
 
-            return None
-        
+            with open(MEMORY_FILE, "r", encoding="utf-8") as arquivo:
 
-        except Exception as erro:
+                self.mensagens = json.load(arquivo)
 
-            logging.error(f'Erro ao conectar com o Ollama: {erro}')
+        except FileNotFoundError:
 
-            return None
+            self.mensagens = []
+
+        except (json.JSONDecodeError, OSError) as erro:
+
+            logging.error(
+                f"Arquivo de memória inválido: {erro}"
+            )
+
+            self.mensagens = []
+
     def limitar_historico(self):
 
-        max_mensagens = MAX_HISTORY*2
+        limite = MAX_HISTORY * 2
 
-        if len(self.mensagens)> max_mensagens + 1:
-            self.mensagens =[
-                self.mensagens[0]
-            ] + self.mensagens[-max_mensagens:]
-        #pegando o system prompt e as 10 ultimas mensagems. concatenando como listas
+        if len(self.mensagens) > limite:
+
+            self.mensagens = self.mensagens[-limite:]
+
     def reset(self):
-        self.mensagens=[{
-            'role':'system',
-            'content':SYSTEM_PROMPT
-        }]
+
+        self.mensagens = []
+
         self.salvar_memoria()
+
     def validar_mensagem(self, mensagem):
 
         if not mensagem.strip():
-            return 'A mensagem não pode estar vazia.'
+
+            return False
 
         if len(mensagem) > MAX_MESSAGE_LENGTH:
-            return f'A mensagem não pode ter mais de {MAX_MESSAGE_LENGTH} caracteres.'
 
-        return None
-    def chat(self,mensagem):
+            return False
 
-        erro= self.validar_mensagem(mensagem)
+        return True
 
-        if erro:
-            return erro
+    def chat(self, mensagem):
 
+        if not self.validar_mensagem(mensagem):
 
-        mensagens = self.mensagens + [{
-            'role':'user',
-            'content': mensagem
-        }
-        ]
-
-        texto = self._enviar_para_ollama(mensagens)
-
-        if texto is None:
-            return 'Não foi possivel obter uma resposta do Ollama'
-        
-
-        self.mensagens.append( {
-            'role':'user',
-            'content':mensagem
-        })
-
-
+            return {
+                "correction": mensagem,
+                "explanation": "Mensagem inválida.",
+                "reply": "Could you try again?"
+            }
 
         self.mensagens.append({
-            'role':'assistant',
-            'content': texto
+            "role": "user",
+            "content": mensagem
         })
 
+        mensagens_groq = [
+            {
+                "role": "system",
+                "content": SYSTEM_PROMPT
+            }
+        ]
 
-        
-        self.limitar_historico()
+        for item in self.mensagens:
 
-        self.salvar_memoria()
+            mensagens_groq.append({
+                "role": item["role"],
+                "content": item["content"]
+            })
 
-        return texto
+        try:
+
+            resposta = self.client.chat.completions.create(
+
+                model=self.model,
+
+                messages=mensagens_groq,
+
+                temperature=0.7,
+
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "english_tutor_response",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "correction": {
+                                    "type": "string"
+                                },
+                                "explanation": {
+                                    "type": "string"
+                                },
+                                "reply": {
+                                    "type": "string"
+                                }
+                            },
+                            "required": [
+                                "correction",
+                                "explanation",
+                                "reply"
+                            ],
+                            "additionalProperties": False
+                        }
+                    }
+                }
+            )
+
+            conteudo = resposta.choices[0].message.content
+
+            resultado = json.loads(conteudo)
+
+            self.mensagens.append({
+                "role": "assistant",
+                "content": conteudo
+            })
+
+            self.limitar_historico()
+
+            self.salvar_memoria()
+
+            return resultado
+
+        except Exception as erro:
+
+            logging.error(
+                f"Erro ao conectar com o Groq: {erro}"
+            )
+
+            # Remove a última mensagem do usuário
+            # caso a API tenha falhado.
+
+            if self.mensagens and self.mensagens[-1]["role"] == "user":
+
+                self.mensagens.pop()
+
+            return {
+                "correction": mensagem,
+                "explanation": "Não foi possível obter uma resposta do Groq.",
+                "reply": "Could you try again?"
+            }
